@@ -15,7 +15,7 @@ PyAudio==0.2.13
 six==1.16.0
 sounddevice==0.4.6
 SpeechRecognition==3.8.1
-tensorboard==2.12.2
+tensorboard==2.11.2
 tensorboard-data-server==0.7.0
 tensorboard-plugin-wit==1.8.1
 tensorflow==2.12.0
