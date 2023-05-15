@@ -11,7 +11,6 @@ openai==0.27.6
 packaging==23.1
 pipwin==0.5.2
 playsound==1.2.2
-PyAudio==0.2.13
 six==1.16.0
 sounddevice==0.4.6
 SpeechRecognition==3.8.1
