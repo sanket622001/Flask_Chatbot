@@ -19,10 +19,6 @@ tensorboard==2.11.2
 tensorboard-data-server==0.7.0
 tensorboard-plugin-wit==1.8.1
 tensorflow==2.11.0
-tensorflow-estimator==2.11.0
-tensorflow-intel==2.11.0
-tensorflow-io-gcs-filesystem==0.31.0
-termcolor==2.3.0
 tokenizers==0.13.3
 transformers==4.28.1
 
