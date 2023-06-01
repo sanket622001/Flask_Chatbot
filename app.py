@@ -1,19 +1,40 @@
-from flask import Flask, jsonify, request
+from flask import Flask, render_template, request, jsonify
 import speech_recognition as sr
 from gtts import gTTS
 import transformers
+import playsound
 import os
+import time
 import datetime
 import numpy as np
-from playsound import playsound
+import logging
 import requests
-import json
-import re
+import base64
+
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 
-class ChatBot():
+def get_incident_tickets():
+    url = "https://dev89134.service-now.com/api/now/table/incident"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Basic " + base64.b64encode(f"admin:1/1YRrg^pwKO".encode()).decode()
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Raise an exception for non-2xx status codes
+        tickets = response.json().get('result', [])
+        return tickets
+    except requests.exceptions.RequestException as e:
+        logger.error("An error occurred while retrieving incident tickets: %s", str(e))
+        return []
+
+
+class ChatBot:
     def __init__(self, name):
         self.name = name
 
@@ -22,18 +43,22 @@ class ChatBot():
         try:
             self.text = recognizer.recognize_google(audio)
             print("Me  --> ", self.text)
-        except:
-            print("Me  -->  ERROR")
+        except Exception as e:
+            logger.exception("Error in speech-to-text conversion")
+            raise e
 
     @staticmethod
     def text_to_speech(text):
         print("Dev --> ", text)
-        speaker = gTTS(text=text, lang="en")
-
-        filename = 'res.mp3'
-        speaker.save(filename)
-        playsound(filename)
-        os.remove(filename)
+        try:
+            speaker = gTTS(text=text, lang="en")
+            filename = 'res.mp3'
+            speaker.save(filename)
+            playsound.playsound(filename)
+            os.remove(filename)
+        except Exception as e:
+            logger.exception("Error in text-to-speech conversion")
+            raise e
 
     def wake_up(self, text):
         return True if self.name in text.lower() else False
@@ -42,45 +67,14 @@ class ChatBot():
     def action_time():
         return datetime.datetime.now().time().strftime('%H:%M')
 
-    @staticmethod
-    def extract_ticket_number(text):
-        # Use regex or other string manipulation techniques to extract the ticket number
-        # Modify this function based on the format of your ticket numbers
-        # This is just a basic example
-        pattern = r"(?:ticket|INC|REQ|PRB)[\s_-]?(\w+)"
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-        else:
-            return None
 
-    @staticmethod
-    def get_ticket_info(ticket_number):
-        baseurl = "https://dev89134.service-now.com/api/now/table/incident/{ticket_number}"
-        username = '<admin>'
-        password = '<1/1YRrg^pwKO>'
-
-        # Make the API call
-        response = requests.get(baseurl, auth=("admin", "1/1YRrg^pwKO"))
-
-        # Check the response status code
-        if response.status_code == 200:
-            # Extract the ticket information from the JSON response
-            ticket_info = response.json().get('result')
-
-            # Extract relevant information from ticket_info and format it as a response message
-            # Customize this based on the information you want to retrieve from ServiceNow
-
-            # Example: Extracting the status of the ticket
-            status = ticket_info[0].get('state')
-
-            # Format the response message
-            response_message = "The status of ticket {ticket_number} is {status}."
-
-            return response_message
-
-        else:
-            return "Failed to retrieve ticket information."
+# Define the ticket status dictionary
+status_dict = {
+    1: "New",
+    2: "In Progress",
+    3: "Closed",
+    # Add more status mappings as needed
+}
 
 
 ai = ChatBot(name="dev")
@@ -90,38 +84,52 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    data = request.json
-    message = data.get('message')
+    if request.method == 'POST':
+        data = request.get_json()
+        message = data['message']
 
-    ai.text = message
+        try:
+            ai.text = message
 
-    if ai.wake_up(ai.text) is True:
-        res = "Hello, I am Dave the AI. What can I do for you?"
-    elif "time" in ai.text:
-        res = ai.action_time()
-    elif any(i in ai.text for i in ["thank", "thanks"]):
-        res = np.random.choice(
-            ["you're welcome!", "anytime!", "no problem!", "cool!", "I'm here if you need me!", "mention not"])
-    elif any(i in ai.text for i in ["exit", "close"]):
-        res = np.random.choice(["Tata", "Have a good day", "Bye", "Goodbye", "Hope to meet soon", "peace out!"])
-    elif "ticket" in ai.text.lower():
-        ticket_number = ai.extract_ticket_number(ai.text)
+            if ai.wake_up(ai.text) is True:
+                res = "Hello, I am Dave the AI. What can I do for you?"
+            elif "time" in ai.text:
+                res = ai.action_time()
+            elif any(i in ai.text for i in ["thank", "thanks"]):
+                res = np.random.choice(
+                    ["you're welcome!", "anytime!", "no problem!", "cool!", "I'm here if you need me!", "mention not"])
+            elif any(i in ai.text for i in ["exit", "close"]):
+                res = np.random.choice(
+                    ["Tata", "Have a good day", "Bye", "Goodbye", "Hope to meet soon", "peace out!"])
+            elif any(i in ai.text for i in ["incident", "tickets"]):
+                tickets = get_incident_tickets()
+                if tickets:
+                    res = "Here are the incident tickets:\n"
+                    for ticket in tickets:
+                        res += f"Ticket ID: {ticket.get('number')}, Description: {ticket.get('short_description')}, Status: {status_dict.get(ticket.get('state'), 'Unknown')}\n"
+                else:
+                    res = "Failed to retrieve incident tickets."
+            else:
+                if ai.text == "ERROR":
+                    res = "Sorry, come again?"
+                else:
+                    chat = nlp(transformers.Conversation(ai.text), pad_token_id=50256)
+                    res = str(chat)
+                    res = res[res.find("bot >> ") + 6:].strip()
 
-        if ticket_number:
-            res = ai.get_ticket_info(ticket_number)
-        else:
-            res = "Please provide a valid ticket number."
-    else:
-        if ai.text == "ERROR":
-            res = "Sorry, come again?"
-        else:
-            chat = nlp(transformers.Conversation(ai.text), pad_token_id=50256)
-            res = str(chat)
-            res = res[res.find("bot >> ") + 6:].strip()
+            ai.text_to_speech(res)
+            return jsonify({'response': res})
+        except Exception as e:
+            logger.exception("Error in processing user request")
+            return jsonify({'error': 'An error occurred. Please try again later.'}), 500
 
-    ai.text_to_speech(res)
-    return jsonify({'response': res})
+
+@app.route('/speak', methods=['GET'])
+def speak():
+    text = request.args.get('text')
+    ai.text_to_speech(text)
+    return ''
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
